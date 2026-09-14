@@ -16,7 +16,7 @@ from urllib.request import urlopen
 UPSTREAM_RAW = "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/"
 SUPPORTED_RULE_TYPES = {"DOMAIN", "DOMAIN-SUFFIX", "IP-CIDR"}
 DOMAIN_RE = re.compile(
-    r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+    r"^(?=.{1,253}$)[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$"
 )
 # These roots have no service boundary. A final subscription may contain an
 # exact service host under one of them, but never the root itself.
@@ -79,10 +79,13 @@ def parse_rule_text(
                 raise ValueError(f"missing value for {rule_type}: {raw_line!r}")
             value = fields[1]
             if rule_type in allowed_rule_types:
-                if rule_type == "IP-CIDR":
-                    entries.add(normalize_ip(value))
-                else:
-                    entries.add(normalize_domain(value))
+                try:
+                    if rule_type == "IP-CIDR":
+                        entries.add(normalize_ip(value))
+                    else:
+                        entries.add(normalize_domain(value))
+                except ValueError:
+                    ignored["INVALID"] += 1
             else:
                 ignored[rule_type] += 1
         elif re.fullmatch(r"[A-Z][A-Z0-9-]*", rule_type):
@@ -119,6 +122,19 @@ def fetch_source(url: str) -> str:
 
 def source_url(source: dict[str, str]) -> str:
     return UPSTREAM_RAW + source["path"]
+
+
+def fetch_from_directory(directory: Path):
+    def fetch(url: str) -> str:
+        if not url.startswith(UPSTREAM_RAW):
+            raise RuntimeError(f"local source does not match configured upstream: {url}")
+        source_path = directory / url.removeprefix(UPSTREAM_RAW)
+        try:
+            return source_path.read_text()
+        except OSError as exc:
+            raise RuntimeError(f"failed to read local source {source_path}: {exc}") from exc
+
+    return fetch
 
 
 def build(config: dict, fetch=fetch_source) -> tuple[list[str], list[dict]]:
@@ -179,6 +195,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, default=Path("sources.json"))
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--upstream-directory", type=Path, help="use a local ios_rule_script checkout")
     parser.add_argument("--check", action="store_true", help="validate an existing subscription without downloading")
     args = parser.parse_args()
 
@@ -190,7 +207,8 @@ def main() -> int:
         print(f"validated {len(entries)} entries in {output}")
         return 0
 
-    entries, summary = build(config)
+    fetch = fetch_from_directory(args.upstream_directory) if args.upstream_directory else fetch_source
+    entries, summary = build(config, fetch=fetch)
     changed = write_output(output, entries)
     counts = Counter(entry_kind(entry) for entry in entries)
     for source in summary:

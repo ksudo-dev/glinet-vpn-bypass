@@ -1,6 +1,8 @@
+import tempfile
 import unittest
+from pathlib import Path
 
-from generate import build, normalize_domain, normalize_ip, parse_rule_text, validate_subscription
+from generate import build, fetch_from_directory, normalize_domain, normalize_ip, parse_rule_text, validate_subscription
 
 
 class GeneratorTests(unittest.TestCase):
@@ -34,6 +36,8 @@ payload:
         with self.assertRaises(ValueError):
             normalize_domain("bad_domain.example")
         with self.assertRaises(ValueError):
+            normalize_domain("100beatscheap.com")
+        with self.assertRaises(ValueError):
             normalize_ip("2001:db8::/32")
 
     def test_deduplication_and_blocking(self):
@@ -54,6 +58,19 @@ payload:
         self.assertTrue(saw_rules)
         self.assertEqual(entries, {"example.com"})
         self.assertEqual(ignored["IP-CIDR"], 1)
+
+    def test_glinet_incompatible_domain_is_not_emitted(self):
+        entries, ignored, _ = parse_rule_text("DOMAIN-SUFFIX,100beatscheap.com\n")
+        self.assertEqual(entries, set())
+        self.assertEqual(ignored["INVALID"], 1)
+
+    def test_local_upstream_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "rule/Clash/Test"
+            source.mkdir(parents=True)
+            (source / "Test.list").write_text("DOMAIN-SUFFIX,example.com\n")
+            fetch = fetch_from_directory(Path(directory))
+            self.assertEqual(fetch("https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Test/Test.list"), "DOMAIN-SUFFIX,example.com\n")
 
     def test_broad_provider_root_is_rejected(self):
         with self.assertRaises(ValueError):

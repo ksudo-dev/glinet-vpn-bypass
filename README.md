@@ -23,7 +23,7 @@ OpenAI, GitHub, Google, YouTube, Cloudflare, AWS, Reddit, Discord, general DNS, 
 
 ## Generation and checks
 
-`generate.py` downloads each Blackmatrix7 `.list` path in `sources.json`, parses the Clash classical format, normalizes domains and IPv4 CIDRs, removes duplicates, validates each output line, and writes sorted deterministic output.
+`generate.py` downloads each Blackmatrix7 `.list` path in `sources.json`, parses the Clash classical format, normalizes entries, removes duplicates, and writes sorted deterministic output. It accepts only domains whose labels start with letters because GL.iNet rejected the 40 numeric-leading upstream domains during subscription import.
 
 Run the build from the repository root:
 
