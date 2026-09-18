@@ -120,15 +120,16 @@ def fetch_source(url: str) -> str:
         raise RuntimeError(f"failed to download {url}: {exc}") from exc
 
 
-def source_url(source: dict[str, str]) -> str:
-    return UPSTREAM_RAW + source["path"]
+def source_url(source: dict[str, str], upstream_raw: str) -> str:
+    return upstream_raw.rstrip("/") + "/" + source["path"]
 
 
-def fetch_from_directory(directory: Path):
+def fetch_from_directory(directory: Path, upstream_raw: str):
     def fetch(url: str) -> str:
-        if not url.startswith(UPSTREAM_RAW):
+        prefix = upstream_raw.rstrip("/") + "/"
+        if not url.startswith(prefix):
             raise RuntimeError(f"local source does not match configured upstream: {url}")
-        source_path = directory / url.removeprefix(UPSTREAM_RAW)
+        source_path = directory / url.removeprefix(prefix)
         try:
             return source_path.read_text()
         except OSError as exc:
@@ -137,8 +138,20 @@ def fetch_from_directory(directory: Path):
     return fetch
 
 
+def filter_domain_allowlist(entries: set[str], allowed_suffixes: list[str]) -> set[str]:
+    normalized_suffixes = {normalize_domain(value) for value in allowed_suffixes}
+    return {
+        entry
+        for entry in entries
+        if "/" not in entry and not entry[0].isdigit()
+        and any(entry == suffix or entry.endswith("." + suffix) for suffix in normalized_suffixes)
+    }
+
+
 def build(config: dict, fetch=fetch_source) -> tuple[list[str], list[dict]]:
     blocked_entries = set(config.get("blocked_entries", []))
+    upstream_raw = config.get("upstream_raw", UPSTREAM_RAW)
+    allowlists = config.get("domain_allowlists", {})
     all_entries: set[str] = set()
     summary: list[dict] = []
 
@@ -148,22 +161,35 @@ def build(config: dict, fetch=fetch_source) -> tuple[list[str], list[dict]]:
         summary.append({"id": group, "category": "manual", "entries": len(normalized), "ignored": {}})
 
     for source in config["sources"]:
-        url = source_url(source)
+        url = source_url(source, upstream_raw)
         entries, ignored, saw_rules = parse_rule_text(
             fetch(url), set(source.get("include_rule_types", ["DOMAIN", "DOMAIN-SUFFIX"]))
         )
         if not saw_rules:
             raise RuntimeError(f"{source['id']}: expected Clash classical rules at {url}")
-        if not entries and source.get("required", True):
-            raise RuntimeError(f"{source['id']}: no usable DOMAIN or IP-CIDR entries at {url}")
         before = len(entries)
+        if allowlist_name := source.get("domain_allowlist"):
+            if allowlist_name not in allowlists:
+                raise RuntimeError(f"{source['id']}: missing domain allowlist {allowlist_name!r}")
+            entries = filter_domain_allowlist(entries, allowlists[allowlist_name])
         entries.difference_update(blocked_entries)
+        if len(entries) < source.get("minimum_entries", 1) and source.get("required", True):
+            raise RuntimeError(
+                f"{source['id']}: {len(entries)} entries after policy filters; "
+                f"minimum is {source.get('minimum_entries', 1)}"
+            )
+        max_invalid = source.get("maximum_invalid_entries", config.get("maximum_invalid_entries", 50))
+        if ignored["INVALID"] > max_invalid:
+            raise RuntimeError(
+                f"{source['id']}: {ignored['INVALID']} GL.iNet-incompatible entries; "
+                f"maximum is {max_invalid}"
+            )
         all_entries.update(entries)
         summary.append({
             "id": source["id"],
             "category": source["category"],
             "entries": len(entries),
-            "blocked": before - len(entries),
+            "filtered": before - len(entries),
             "ignored": dict(sorted(ignored.items())),
         })
 
@@ -207,14 +233,18 @@ def main() -> int:
         print(f"validated {len(entries)} entries in {output}")
         return 0
 
-    fetch = fetch_from_directory(args.upstream_directory) if args.upstream_directory else fetch_source
+    fetch = (
+        fetch_from_directory(args.upstream_directory, config.get("upstream_raw", UPSTREAM_RAW))
+        if args.upstream_directory
+        else fetch_source
+    )
     entries, summary = build(config, fetch=fetch)
     changed = write_output(output, entries)
     counts = Counter(entry_kind(entry) for entry in entries)
     for source in summary:
         details = f" ignored={source['ignored']}" if source["ignored"] else ""
-        blocked = f" blocked={source.get('blocked', 0)}" if source.get("blocked") else ""
-        print(f"{source['category']:<10} {source['id']:<22} entries={source['entries']}{blocked}{details}")
+        filtered = f" filtered={source.get('filtered', 0)}" if source.get("filtered") else ""
+        print(f"{source['category']:<10} {source['id']:<22} entries={source['entries']}{filtered}{details}")
     print(f"total domains={counts['domain']} ipv4={counts['ipv4']} cidrs={counts['cidr']} output={output} changed={changed}")
     return 0
 

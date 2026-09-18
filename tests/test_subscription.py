@@ -34,3 +34,8 @@ class SubscriptionTests(unittest.TestCase):
                 "224.0.0.0/4",
             },
         )
+
+    def test_generic_apple_feed_and_known_typos_are_absent(self):
+        paths = {source["path"] for source in self.config["sources"]}
+        self.assertNotIn("rule/Clash/Apple/Apple.list", paths)
+        self.assertFalse({"a0pple.net", "100beatscheap.com", "airport.com"} & self.entries)

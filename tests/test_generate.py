@@ -2,7 +2,15 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from generate import build, fetch_from_directory, normalize_domain, normalize_ip, parse_rule_text, validate_subscription
+from generate import (
+    build,
+    fetch_from_directory,
+    filter_domain_allowlist,
+    normalize_domain,
+    normalize_ip,
+    parse_rule_text,
+    validate_subscription,
+)
 
 
 class GeneratorTests(unittest.TestCase):
@@ -48,7 +56,7 @@ payload:
         }
         entries, summary = build(config, fetch=lambda _: "DOMAIN,example.com\nDOMAIN-SUFFIX,onetrust.com\n")
         self.assertEqual(entries, ["10.0.0.0/8", "example.com"])
-        self.assertEqual(summary[-1]["blocked"], 1)
+        self.assertEqual(summary[-1]["filtered"], 1)
 
     def test_domain_only_source_policy_skips_ip_ranges(self):
         entries, ignored, saw_rules = parse_rule_text(
@@ -69,8 +77,23 @@ payload:
             source = Path(directory) / "rule/Clash/Test"
             source.mkdir(parents=True)
             (source / "Test.list").write_text("DOMAIN-SUFFIX,example.com\n")
-            fetch = fetch_from_directory(Path(directory))
+            upstream = "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master"
+            fetch = fetch_from_directory(Path(directory), upstream)
             self.assertEqual(fetch("https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Test/Test.list"), "DOMAIN-SUFFIX,example.com\n")
+
+    def test_apple_domain_allowlist_rejects_typos(self):
+        entries = {"appleid.apple.com", "a0pple.net", "applemusic.com", "news.example.net"}
+        self.assertEqual(
+            filter_domain_allowlist(entries, ["apple.com", "applemusic.com"]),
+            {"appleid.apple.com", "applemusic.com"},
+        )
+
+    def test_minimum_entries_fails_closed(self):
+        config = {
+            "sources": [{"id": "example", "category": "test", "path": "x", "minimum_entries": 2}],
+        }
+        with self.assertRaisesRegex(RuntimeError, "minimum is 2"):
+            build(config, fetch=lambda _: "DOMAIN-SUFFIX,example.com\n")
 
     def test_broad_provider_root_is_rejected(self):
         with self.assertRaises(ValueError):
