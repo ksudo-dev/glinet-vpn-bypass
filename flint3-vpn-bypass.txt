@@ -282,6 +282,7 @@ dlp-media.com
 dmed.technology
 dmqdd6hw24ucf.cloudfront.net
 donkeykongcountryreturns.com
+dota2.com
 dota2.wmsj.cn
 dragonage.com
 dragonagekeep.com
@@ -1004,6 +1005,7 @@ steambroadcast.akamaized.net
 steamcdn-a.akamaihd.net
 steamcommunity-a.akamaihd.net
 steamcommunity.com
+steamconnecttest.com
 steamcontent.tnkjmec.com
 steamdeck.com
 steamgames.com
@@ -1091,6 +1093,7 @@ uoherald.com
 updates-http.cdn-apple.com
 updates.cdn-apple.com
 uts-api.itunes.apple.com
+valve.net
 valvesoftware.com
 venmo-touch.com
 venmo.com
